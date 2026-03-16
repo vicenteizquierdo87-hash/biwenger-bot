@@ -65,6 +65,9 @@ async def menu_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         [
             InlineKeyboardButton("📊 Puntos Jornada", callback_data='menu_puntos'),
             InlineKeyboardButton("🏆 Info Liga", callback_data='menu_liga')
+        ],
+        [
+            InlineKeyboardButton("⚖️ Comparar Jugadores", callback_data='menu_comparar')
         ]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
@@ -80,6 +83,13 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await puntos_command(update, context)
     elif query.data == 'menu_liga':
         await liga_command(update, context)
+    elif query.data == 'menu_comparar':
+        await query.message.reply_text(
+            "⚖️ *Comparativa de Jugadores*\n\n"
+            "Para comparar dos jugadores, escribe el comando así:\n"
+            "`/comparar Jugador1 vs Jugador2`",
+            parse_mode='Markdown'
+        )
     elif query.data == 'menu_mercado':
         await mercado_command(update, context)
     elif query.data == 'menu_records':
