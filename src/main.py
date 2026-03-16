@@ -26,11 +26,19 @@ persistence = Persistence()
 
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Responde al comando /start"""
-    await update.message.reply_text(
-        "👋 ¡Hola! Soy tu bot de Biwenger.\n\n"
-        "Te avisaré del inicio de las jornadas, alineaciones 5 minutos antes y puntos.\n\n"
-        "*(El sistema automático aún está en construcción, usa /test para comprobar que funciono)*"
+    msg = (
+        "👋 *¡HOLA! BIENVENIDO A TU BOT DE BIWENGER* ⚽\n"
+        "━━━━━━━━━━━━━━━━━━━\n"
+        "Estaré vigilando tu liga las 24 horas para avisarte de:\n"
+        "🚀 Inicio de jornadas\n"
+        "📋 Alineaciones confirmadas (5 min antes)\n"
+        "📊 Puntos en tiempo real\n"
+        "🚑 Cambios de estado (Lesiones/Bajas)\n"
+        "━━━━━━━━━━━━━━━━━━━\n"
+        "🎮 Usa `/menu` para ver todas las opciones.\n"
+        "¡Mucha suerte! 🍀"
     )
+    await update.message.reply_text(msg, parse_mode='Markdown')
 
 async def test_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Comando simple de prueba"""
@@ -219,11 +227,14 @@ async def puntos_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Ordenar por puntos de la jornada
     standings.sort(key=lambda x: x.get('points', 0), reverse=True)
 
-    txt = "🏆 *Puntos de la Jornada*\n\n"
+    txt = "🏆 *PUNTOS DE LA JORNADA* 🏆\n"
+    txt += "━━━━━━━━━━━━━━━━━━━\n"
     for i, user in enumerate(standings, 1):
-        txt += f"{i}. *{user['name']}*: {user['points']} pts\n"
+        medal = "🥇" if i == 1 else "🥈" if i == 2 else "🥉" if i == 3 else "▫️"
+        txt += f"{medal} *{user['name']}*: {user['points']} pts\n"
     
-    txt += "\n_Puntos actualizados en tiempo real_ ⚽"
+    txt += "━━━━━━━━━━━━━━━━━━━\n"
+    txt += "_Puntos actualizados en tiempo real_ ⚽"
     await msg_target.reply_text(txt, parse_mode='Markdown')
 
 async def comparar_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -277,10 +288,13 @@ async def records_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     max_pts = records["max_round_score"]
     
     msg = (
-        f"🏆 *SALÓN DE LA FAMA* 🏆\n\n"
-        f"💎 *Máxima Puntuación:* {max_pts['points']} pts\n"
+        f"🏆 *SALÓN DE LA FAMA* 🏆\n"
+        f"━━━━━━━━━━━━━━━━━━━\n"
+        f"💎 *Máxima Puntuación Total:*\n"
+        f"   *{max_pts['points']} pts*\n\n"
         f"🏅 *Rey de la Colina:* {max_pts['user']}\n"
-        f"📅 *Logrado en:* {max_pts['round']}\n\n"
+        f"📅 *Logrado en:* {max_pts['round']}\n"
+        f"━━━━━━━━━━━━━━━━━━━\n"
         f"¡Esforzaos para superar estos números! 💪"
     )
     await update.message.reply_text(msg, parse_mode='Markdown')
