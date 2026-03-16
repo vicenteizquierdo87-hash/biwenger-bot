@@ -1,8 +1,8 @@
 import os
 import logging
 from dotenv import load_dotenv
-from telegram import Update
-from telegram.ext import Application, CommandHandler, ContextTypes
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import Application, CommandHandler, ContextTypes, CallbackQueryHandler
 from biwenger import BiwengerAPI
 from scheduler import BiwengerScheduler
 from persistence import Persistence
@@ -58,6 +58,75 @@ async def id_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Comando temporal para obtener el ID del grupo."""
     chat_id = update.message.chat_id
     await update.message.reply_text(f"El ID de este chat es:\n`{chat_id}`", parse_mode='Markdown')
+
+async def menu_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Muestra el menú principal con botones."""
+    keyboard = [
+        [
+            InlineKeyboardButton("📊 Puntos Jornada", callback_data='menu_puntos'),
+            InlineKeyboardButton("🏆 Info Liga", callback_data='menu_liga')
+        ],
+        [
+            InlineKeyboardButton("🏟 Mercado", callback_data='menu_mercado'),
+            InlineKeyboardButton("💎 Récords", callback_data='menu_records')
+        ],
+        [InlineKeyboardButton("❓ Ayuda", callback_data='menu_ayuda')]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    await update.message.reply_text("🎮 *Panel de Control Biwenger*\nElige una opción:", reply_markup=reply_markup, parse_mode='Markdown')
+
+async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Maneja las pulsaciones de los botones del menú."""
+    query = update.callback_query
+    await query.answer()
+
+    if query.data == 'menu_puntos':
+        await query.message.reply_text("📊 Consultando puntos en directo...")
+        await puntos_command(update, context)
+    elif query.data == 'menu_liga':
+        await liga_command(update, context)
+    elif query.data == 'menu_mercado':
+        await mercado_command(update, context)
+    elif query.data == 'menu_records':
+        await records_command(update, context)
+    elif query.data == 'menu_ayuda':
+        await query.message.reply_text(
+            "📖 *Comandos disponibles:*\n"
+            "/menu - Panel de control\n"
+            "/puntos - Clasificación jornada\n"
+            "/liga - Info de tu liga\n"
+            "/comparar `A vs B` - Compara jugadores\n"
+            "/records - Salón de la fama",
+            parse_mode='Markdown'
+        )
+
+async def mercado_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Muestra los jugadores que están actualmente en el mercado."""
+    origin = update.message if update.message else update.callback_query.message
+    await origin.reply_text("🏟 *Consultando el mercado de fichajes...*")
+    
+    market = biwenger_api.get_market()
+    if not market or 'sales' not in market:
+        await origin.reply_text("❌ No se ha podido obtener el mercado.")
+        return
+
+    sales = market.get('sales', [])
+    if not sales:
+        await origin.reply_text("📭 El mercado está vacío ahora mismo.")
+        return
+
+    txt = "🏟 *JUGADORES EN EL MERCADO*\n\n"
+    # Filtrar solo jugadores de la liga (no del sistema, aunque Biwenger suele mezclarlos)
+    for sale in sales[:12]: # Top 12 para no saturar
+        player = sale.get('player', {})
+        price = sale.get('price', 0)
+        user = sale.get('user', {}).get('name', 'Sistema')
+        
+        txt += f"👤 *{player.get('name')}* ({player.get('position')})\n"
+        txt += f"💰 `{price:,}€` | 🏠 {user}\n\n"
+
+    txt += "_Fíchalos antes de que te los quiten_ 🏃‍♂️"
+    await origin.reply_text(txt, parse_mode='Markdown')
 
 async def puntos_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Comando para obtener la clasificación en vivo de la jornada actual."""
@@ -177,6 +246,11 @@ def main():
     application.add_handler(CommandHandler("puntos", puntos_command))
     application.add_handler(CommandHandler("comparar", comparar_command))
     application.add_handler(CommandHandler("records", records_command))
+    application.add_handler(CommandHandler("menu", menu_command))
+    application.add_handler(CommandHandler("mercado", mercado_command))
+    
+    # Manejador de botones
+    application.add_handler(CallbackQueryHandler(button_handler))
 
     # Iniciar servidor de health check para Koyeb en un hilo separado
     health_thread = threading.Thread(target=run_health_check_server, daemon=True)
