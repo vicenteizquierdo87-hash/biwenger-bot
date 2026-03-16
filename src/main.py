@@ -185,12 +185,22 @@ async def comparar_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not fitness: return "Sin datos"
         return " ".join([str(x) if x is not None else "-" for x in fitness[:5]])
 
+    msg = (
+        f"📊 *COMPARATIVA* 📊\n\n"
+        f"👤 *{p1['name']}* vs *{p2['name']}*\n\n"
+        f"📍 *Pos:* {p1['position']} | {p2['position']}\n"
+        f"📈 *Media:* {p1.get('points', 0)} pts | {p2.get('points', 0)} pts\n"
+        f"🔥 *Últimos 5:* `{get_fitness_text(p1.get('fitness'))}` | `{get_fitness_text(p2.get('fitness'))}`\n"
+        f"📢 *Estado:* {p1.get('status', 'ok')} | {p2.get('status', 'ok')}\n"
+    )
+
     keyboard = [
         [InlineKeyboardButton("🏟 Ver Mercado", callback_data='menu_mercado')],
         [InlineKeyboardButton("🎮 Volver al Menú", callback_data='menu_ayuda')]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
-    await update.message.reply_text(msg, reply_markup=reply_markup, parse_mode='Markdown')
+    msg_target = update.effective_message
+    await msg_target.reply_text(msg, reply_markup=reply_markup, parse_mode='Markdown')
 
 async def records_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Muestra el salón de la fama."""
