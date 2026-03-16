@@ -159,17 +159,18 @@ async def puntos_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def comparar_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Comando /comparar JugadorA vs JugadorB"""
+    msg_target = update.effective_message
     if not context.args:
-        await update.message.reply_text("Uso: /comparar [jugador1] vs [jugador2]")
+        await msg_target.reply_text("Uso: /comparar [jugador1] vs [jugador2]")
         return
     
     query = " ".join(context.args)
     if " vs " not in query.lower():
-        await update.message.reply_text("Debes separar los nombres con 'vs'. Ejemplo: /comparar Pedri vs Gavi")
+        await msg_target.reply_text("Debes separar los nombres con 'vs'. Ejemplo: /comparar Pedri vs Gavi")
         return
     
     nombres = query.lower().split(" vs ")
-    await update.message.reply_text(f"🔍 Buscando estadísticas de {nombres[0].title()} y {nombres[1].title()}...")
+    await msg_target.reply_text(f"🔍 Buscando estadísticas de {nombres[0].title()} y {nombres[1].title()}...")
     
     p1 = biwenger_api.search_player(nombres[0].strip())
     p2 = biwenger_api.search_player(nombres[1].strip())
@@ -178,7 +179,7 @@ async def comparar_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         error_msg = "❌ No he podido encontrar a alguno de los jugadores. Intenta ser más específico."
         if not p1: error_msg += f"\n- No encontré a '{nombres[0].strip()}'"
         if not p2: error_msg += f"\n- No encontré a '{nombres[1].strip()}'"
-        await update.message.reply_text(error_msg)
+        await msg_target.reply_text(error_msg)
         return
 
     def get_fitness_text(fitness):
