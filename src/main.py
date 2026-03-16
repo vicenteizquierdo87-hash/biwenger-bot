@@ -65,12 +65,7 @@ async def menu_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         [
             InlineKeyboardButton("📊 Puntos Jornada", callback_data='menu_puntos'),
             InlineKeyboardButton("🏆 Info Liga", callback_data='menu_liga')
-        ],
-        [
-            InlineKeyboardButton("🏟 Mercado", callback_data='menu_mercado'),
-            InlineKeyboardButton("💎 Récords", callback_data='menu_records')
-        ],
-        [InlineKeyboardButton("❓ Ayuda", callback_data='menu_ayuda')]
+        ]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     await update.message.reply_text("🎮 *Panel de Control Biwenger*\nElige una opción:", reply_markup=reply_markup, parse_mode='Markdown')
