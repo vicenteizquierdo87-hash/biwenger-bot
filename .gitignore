@@ -1,0 +1,11 @@
+.env
+__pycache__/
+*.pyc
+venv/
+.venv/
+data/
+tmp/
+.gemini/
+.agents/
+node_modules/
+docker-compose.override.yml
