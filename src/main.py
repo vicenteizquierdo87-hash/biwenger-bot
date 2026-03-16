@@ -45,13 +45,16 @@ async def liga_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         nombre = info.get('name', 'Desconocida')
         competicion = info.get('competition', 'Desconocida')
         usuarios = len(info.get('users', []))
-        await msg_target.reply_text(
-            f"🏆 *Liga:* {nombre}\n"
+        msg = (
+            f"🏆 *INFORMACIÓN DE LA LIGA* 🏆\n"
+            f"━━━━━━━━━━━━━━━━━━━\n"
+            f"🏟 *Nombre:* {nombre}\n"
             f"⚽ *Competición:* {competicion}\n"
-            f"👥 *Participantes:* {usuarios}\n\n"
-            f"¡Conexión con Biwenger completada con éxito! ✅",
-            parse_mode='Markdown'
+            f"👥 *Participantes:* {usuarios}\n"
+            f"━━━━━━━━━━━━━━━━━━━\n"
+            f"¡Conexión con Biwenger lista! ✅"
         )
+        await msg_target.reply_text(msg, parse_mode='Markdown')
     else:
         await msg_target.reply_text("❌ Ha ocurrido un error al conectar con la API de Biwenger. Revisa tus tokens.")
 
@@ -248,17 +251,16 @@ async def comparar_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await msg_target.reply_text(error_msg)
         return
 
-    def get_fitness_text(fitness):
-        if not fitness: return "Sin datos"
-        return " ".join([str(x) if x is not None else "-" for x in fitness[:5]])
-
     msg = (
-        f"📊 *COMPARATIVA* 📊\n\n"
-        f"👤 *{p1['name']}* vs *{p2['name']}*\n\n"
+        f"⚖️ *COMPARATIVA DE CRACKS* ⚖️\n"
+        f"━━━━━━━━━━━━━━━━━━━\n"
+        f"👤 *{p1['name']}* vs *{p2['name']}*\n"
         f"📍 *Pos:* {p1['position']} | {p2['position']}\n"
-        f"📈 *Media:* {p1.get('points', 0)} pts | {p2.get('points', 0)} pts\n"
-        f"🔥 *Últimos 5:* `{get_fitness_text(p1.get('fitness'))}` | `{get_fitness_text(p2.get('fitness'))}`\n"
+        f"📈 *Media:* {p1.get('points', 0)} | {p2.get('points', 0)} pts\n"
+        f"🔥 *Forma:* `{get_fitness_text(p1.get('fitness'))}`\n"
+        f"🔥 *Forma:* `{get_fitness_text(p2.get('fitness'))}`\n"
         f"📢 *Estado:* {p1.get('status', 'ok')} | {p2.get('status', 'ok')}\n"
+        f"━━━━━━━━━━━━━━━━━━━\n"
     )
 
     keyboard = [
