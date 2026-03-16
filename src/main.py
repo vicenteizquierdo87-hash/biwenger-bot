@@ -201,13 +201,19 @@ async def jugador_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 def get_fitness_text(fitness):
     if not fitness: return "Sin datos"
-    # Convertir puntos a círculos o iconos (verde si > 5, gris si <= 5)
+    # Convertir puntos a círculos o iconos (verde si >= 6, amarillo si >= 2, rojo si < 2)
     icons = []
     for f in fitness[:5]:
-        if f is None: icons.append("⚪")
-        elif f >= 6: icons.append("🟢")
-        elif f >= 2: icons.append("🟡")
-        else: icons.append("🔴")
+        if f is None:
+            icons.append("⚪")
+            continue
+        try:
+            val = float(f)
+            if val >= 6: icons.append("🟢")
+            elif val >= 2: icons.append("🟡")
+            else: icons.append("🔴")
+        except (ValueError, TypeError):
+            icons.append("⚪")
     return " ".join(icons)
 
 async def puntos_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
