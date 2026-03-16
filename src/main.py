@@ -68,7 +68,8 @@ async def menu_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             InlineKeyboardButton("🏆 Info Liga", callback_data='menu_liga')
         ],
         [
-            InlineKeyboardButton("⚖️ Comparar Jugadores", callback_data='menu_comparar')
+            InlineKeyboardButton("⚖️ Comparar Jugadores", callback_data='menu_comparar'),
+            InlineKeyboardButton("🔍 Buscar Jugador", callback_data='menu_jugador')
         ]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
@@ -86,8 +87,15 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif query.data == 'menu_comparar':
         await query.message.reply_text(
             "⚖️ *Comparativa de Jugadores*\n\n"
-            "Para comparar dos jugadores, escribe el comando así:\n"
+            "Escribe el comando así:\n"
             "`/comparar Jugador1 vs Jugador2`",
+            parse_mode='Markdown'
+        )
+    elif query.data == 'menu_jugador':
+        await query.message.reply_text(
+            "🔍 *Búsqueda de Jugador*\n\n"
+            "Escribe el comando seguido del nombre:\n"
+            "`/jugador Pedri`",
             parse_mode='Markdown'
         )
     elif query.data == 'menu_mercado':
@@ -132,6 +140,64 @@ async def mercado_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     txt += "_Fíchalos antes de que te los quiten_ 🏃‍♂️"
     await origin.reply_text(txt, parse_mode='Markdown')
+
+async def jugador_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Muestra la ficha detallada de un jugador."""
+    msg_target = update.effective_message
+    if not context.args:
+        await msg_target.reply_text("Uso: `/jugador [nombre]` (ej: `/jugador Gavi`)", parse_mode='Markdown')
+        return
+    
+    query = " ".join(context.args).strip()
+    await msg_target.reply_text(f"🔍 Buscando a *{query.title()}*...", parse_mode='Markdown')
+    
+    player = biwenger_api.search_player(query)
+    if not player:
+        await msg_target.reply_text(f"❌ No he podido encontrar a *{query}*. Intenta ser más específico.", parse_mode='Markdown')
+        return
+
+    # Formatear el estado
+    st_emojis = {"injured": "🚑 Lesionado", "warned": "⚠️ Dudoso", "suspended": "🟥 Sancionado", "doubt": "❓ Duda", "ok": "✅ Disponible"}
+    estado = st_emojis.get(player.get('status'), "✅ Disponible")
+
+    # Formatear la posición
+    pos_names = {"1": "Portero", "2": "Defensa", "3": "Centrocampista", "4": "Delantero"}
+    posicion = pos_names.get(str(player.get('position')), "Jugador")
+
+    # Construir el mensaje "Bonito"
+    msg = (
+        f"🌟 *FICHA DE JUGADOR* 🌟\n"
+        f"━━━━━━━━━━━━━━━━━━━\n"
+        f"👤 *{player['name'].upper()}*\n"
+        f"🛡 *{player.get('teamName', 'La Liga')}* | 🏃‍♂️ *{posicion}*\n"
+        f"━━━━━━━━━━━━━━━━━━━\n"
+        f"💰 *Valor:* `{player.get('price', 0):,}€`\n"
+        f"📢 *Estado:* {estado}\n"
+        f"🔥 *Forma:* `{get_fitness_text(player.get('fitness'))}`\n"
+        f"━━━━━━━━━━━━━━━━━━━\n"
+        f"📊 *Puntos Totales:* {player.get('points', 0)} pts\n"
+        f"📈 *Media:* {player.get('pointsPerGame', 0)} pts/partido\n"
+        f"━━━━━━━━━━━━━━━━━━━\n"
+        f"_Información actualizada de Biwenger_ ⚽"
+    )
+
+    keyboard = [
+        [InlineKeyboardButton("⚖️ Comparar con otro", callback_data='menu_comparar')],
+        [InlineKeyboardButton("🎮 Volver al Menú", callback_data='menu_ayuda')]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    await msg_target.reply_text(msg, reply_markup=reply_markup, parse_mode='Markdown')
+
+def get_fitness_text(fitness):
+    if not fitness: return "Sin datos"
+    # Convertir puntos a círculos o iconos (verde si > 5, gris si <= 5)
+    icons = []
+    for f in fitness[:5]:
+        if f is None: icons.append("⚪")
+        elif f >= 6: icons.append("🟢")
+        elif f >= 2: icons.append("🟡")
+        else: icons.append("🔴")
+    return " ".join(icons)
 
 async def puntos_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Comando para obtener la clasificación en vivo de la jornada actual."""
@@ -262,6 +328,7 @@ def main():
     application.add_handler(CommandHandler("records", records_command))
     application.add_handler(CommandHandler("menu", menu_command))
     application.add_handler(CommandHandler("mercado", mercado_command))
+    application.add_handler(CommandHandler("jugador", jugador_command))
     
     # Manejador de botones
     application.add_handler(CallbackQueryHandler(button_handler))
