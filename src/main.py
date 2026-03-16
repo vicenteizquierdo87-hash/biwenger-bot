@@ -38,13 +38,14 @@ async def test_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def liga_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Comando para probar la conexión con Biwenger obteniendo la info de la liga."""
-    await update.message.reply_text("⏳ Conectando con Biwenger... obteniendo info de tu liga...")
+    msg_target = update.effective_message
+    await msg_target.reply_text("⏳ Conectando con Biwenger... obteniendo info de tu liga...")
     info = biwenger_api.get_league_info()
     if info:
         nombre = info.get('name', 'Desconocida')
         competicion = info.get('competition', 'Desconocida')
         usuarios = len(info.get('users', []))
-        await update.message.reply_text(
+        await msg_target.reply_text(
             f"🏆 *Liga:* {nombre}\n"
             f"⚽ *Competición:* {competicion}\n"
             f"👥 *Participantes:* {usuarios}\n\n"
@@ -52,7 +53,7 @@ async def liga_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             parse_mode='Markdown'
         )
     else:
-        await update.message.reply_text("❌ Ha ocurrido un error al conectar con la API de Biwenger. Revisa tus tokens.")
+        await msg_target.reply_text("❌ Ha ocurrido un error al conectar con la API de Biwenger. Revisa tus tokens.")
 
 async def id_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Comando temporal para obtener el ID del grupo."""
@@ -79,7 +80,6 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.answer()
 
     if query.data == 'menu_puntos':
-        await query.message.reply_text("📊 Consultando puntos en directo...")
         await puntos_command(update, context)
     elif query.data == 'menu_liga':
         await liga_command(update, context)
@@ -135,15 +135,16 @@ async def mercado_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def puntos_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Comando para obtener la clasificación en vivo de la jornada actual."""
-    await update.message.reply_text("📊 Consultando puntos en directo de la jornada...")
+    msg_target = update.effective_message
+    await msg_target.reply_text("📊 Consultando puntos en directo de la jornada...")
     data = biwenger_api.get_round_standings()
     if not data or 'league' not in data:
-        await update.message.reply_text("❌ No se han podido obtener los puntos. ¿Ha empezado ya la jornada?")
+        await msg_target.reply_text("❌ No se han podido obtener los puntos. ¿Ha empezado ya la jornada?")
         return
 
     standings = data['league'].get('standings', [])
     if not standings:
-        await update.message.reply_text("📭 Todavía no hay puntos registrados para esta jornada.")
+        await msg_target.reply_text("📭 Todavía no hay puntos registrados para esta jornada.")
         return
 
     # Ordenar por puntos de la jornada
@@ -154,7 +155,7 @@ async def puntos_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         txt += f"{i}. *{user['name']}*: {user['points']} pts\n"
     
     txt += "\n_Puntos actualizados en tiempo real_ ⚽"
-    await update.message.reply_text(txt, parse_mode='Markdown')
+    await msg_target.reply_text(txt, parse_mode='Markdown')
 
 async def comparar_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Comando /comparar JugadorA vs JugadorB"""
