@@ -15,10 +15,14 @@ logging.basicConfig(
     level=logging.INFO
 )
 logger = logging.getLogger(__name__)
+ 
+# Estados para la captura de sugerencias
+SUGGESTION_WAITING = 1
 
 # Cargar variables de entorno
 load_dotenv()
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
+DEV_CHAT_ID = os.getenv("DEVELOPER_CHAT_ID")
 
 # Instanciar el cliente de Biwenger y persistencia
 biwenger_api = BiwengerAPI()
@@ -62,7 +66,11 @@ async def liga_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"━━━━━━━━━━━━━━━━━━━\n"
             f"¡Conexión con Biwenger lista! ✅"
         )
-        await msg_target.reply_text(msg, parse_mode='Markdown')
+        keyboard = [
+            [InlineKeyboardButton("📩 Enviar Sugerencia", callback_data='menu_sugerencia')]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await msg_target.reply_text(msg, reply_markup=reply_markup, parse_mode='Markdown')
     else:
         await msg_target.reply_text("❌ Ha ocurrido un error al conectar con la API de Biwenger. Revisa tus tokens.")
 
@@ -109,6 +117,14 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "`/jugador Pedri`",
             parse_mode='Markdown'
         )
+    elif query.data == 'menu_sugerencia':
+        context.user_data['state'] = SUGGESTION_WAITING
+        await query.message.reply_text(
+            "📩 *ENVIAR SUGERENCIA*\n\n"
+            "Escribe a continuación tu idea o sugerencia para mejorar el bot. "
+            "Vicente la recibirá directamente en su chat privado. ✨",
+            parse_mode='Markdown'
+        )
     elif query.data == 'menu_mercado':
         await mercado_command(update, context)
     elif query.data == 'menu_records':
@@ -151,6 +167,41 @@ async def mercado_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     txt += "_Fíchalos antes de que te los quiten_ 🏃‍♂️"
     await origin.reply_text(txt, parse_mode='Markdown')
+
+async def suggestion_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Captura y reenvía sugerencias al desarrollador."""
+    if context.user_data.get('state') != SUGGESTION_WAITING:
+        return
+
+    msg = update.effective_message
+    dev_id = os.getenv("DEVELOPER_CHAT_ID") or os.getenv("TELEGRAM_CHAT_ID")
+    
+    if not dev_id:
+        await msg.reply_text("❌ Lo siento, el sistema de sugerencias no está configurado correctamente (falta ID).")
+        context.user_data['state'] = None
+        return
+
+    user = update.effective_user
+    username = f"@{user.username}" if user.username else user.full_name
+    
+    forward_msg = (
+        f"📩 *NUEVA SUGERENCIA DEL BOT* 📩\n"
+        f"━━━━━━━━━━━━━━━━━━━\n"
+        f"👤 *De:* {username} (ID: `{user.id}`)\n"
+        f"📝 *Mensaje:*\n"
+        f"\"{msg.text}\"\n"
+        f"━━━━━━━━━━━━━━━━━━━\n"
+        f"_Enviado desde el bot de Biwenger_ ⚽"
+    )
+    
+    try:
+        await context.bot.send_message(chat_id=dev_id, text=forward_msg, parse_mode='Markdown')
+        await msg.reply_text("✅ ¡Muchas gracias! Tu sugerencia ha sido enviada con éxito. Vicente la revisará pronto.")
+    except Exception as e:
+        logger.error(f"Error reenviando sugerencia: {e}")
+        await msg.reply_text("❌ No se ha podido enviar la sugerencia en este momento. Inténtalo más tarde.")
+    
+    context.user_data['state'] = None
 
 async def jugador_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Muestra la ficha detallada de un jugador."""
@@ -351,6 +402,10 @@ def main():
     application.add_handler(CommandHandler("menu", menu_command))
     application.add_handler(CommandHandler("mercado", mercado_command))
     application.add_handler(CommandHandler("jugador", jugador_command))
+    
+    # Manejador de sugerencias (mensajes de texto que no son comandos)
+    from telegram.ext import MessageHandler, filters
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, suggestion_handler))
     
     # Manejador de botones
     application.add_handler(CallbackQueryHandler(button_handler))
