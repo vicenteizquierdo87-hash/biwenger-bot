@@ -87,12 +87,26 @@ class BiwengerScheduler:
                 first_match_utc = datetime.fromtimestamp(first_game_total['date'], tz=pytz.UTC)
                 first_match_local = first_match_utc.astimezone(self.tz)
                 if today_start <= first_match_local < today_end and first_match_local > now:
-                     self.app.job_queue.run_once(
-                            self._notify_round_start_job,
-                            when=first_match_local,
-                            name="inicio_jornada"
-                        )
-                     logger.info(f"Alarma de inicio de jornada programada a las {first_match_local.strftime('%H:%M')}")
+                     # Alarma 30 min antes
+                     warning_time = first_match_local - timedelta(minutes=30)
+                     if warning_time > now:
+                         self.app.job_queue.run_once(
+                                self._notify_round_warning_30min_job,
+                                when=warning_time,
+                                name="aviso_30min_jornada"
+                            )
+                         logger.info(f"Alarma de 30 min para inicio de jornada programada a las {warning_time.strftime('%H:%M')}")
+
+                     # Alarma de inicio (5 min antes para que de tiempo a leer antes del piteo)
+                     start_notify_time = first_match_local - timedelta(minutes=5)
+                     if start_notify_time > now:
+                         self.app.job_queue.run_once(
+                                self._notify_round_start_job,
+                                when=start_notify_time,
+                                data={'first_match': f"{first_game_total['home']['name']} vs {sorted_games[0]['away']['name']}"},
+                                name="inicio_jornada"
+                            )
+                         logger.info(f"Alarma de inicio de jornada programada a las {start_notify_time.strftime('%H:%M')}")
 
             for game in games:
                 match_date_utc = datetime.fromtimestamp(game['date'], tz=pytz.UTC)
@@ -147,8 +161,23 @@ class BiwengerScheduler:
         
         logger.info(f"Se han programado {matches_today} alarmas de alineaciones para hoy.")
 
+    async def _notify_round_warning_30min_job(self, context):
+        mensaje = (
+            "⏳ *¡ÚLTIMO AVISO! (30 MIN)*\n"
+            "━━━━━━━━━━━━━━━━━━━\n"
+            "Quedan exactamente 30 minutos para que empiece la jornada.\n\n"
+            "🚨 *¡Asegúrate de que tu alineación esté guardada!* A partir del inicio del primer partido ya no podrás hacer cambios. 🛑"
+        )
+        await self.app.bot.send_message(chat_id=self.chat_id, text=mensaje, parse_mode='Markdown')
+
     async def _notify_round_start_job(self, context):
-        mensaje = "🚀 *¡COMIENZA LA JORNADA!* 🚀\n\nEl primer partido está a punto de empezar. ¡Mucha suerte a todos en Biwenger! 🍀"
+        match_info = context.job.data.get('first_match', 'el primer partido')
+        mensaje = (
+            "🚀 *¡COMIENZA LA JORNADA!* 🚀\n"
+            "━━━━━━━━━━━━━━━━━━━\n"
+            f"El primer partido (*{match_info}*) está a punto de empezar.\n\n"
+            "¡Alineaciones Guardadas! Mucha suerte a todos en Biwenger. 🍀🏆"
+        )
         await self.app.bot.send_message(chat_id=self.chat_id, text=mensaje, parse_mode='Markdown')
 
     async def _track_live_points_job(self, context):
@@ -232,9 +261,23 @@ class BiwengerScheduler:
         self.persistence.save_player_states(old_states)
 
         if changes:
-            msg = "📢 *EL CHIVATO DE BAJAS*\n\nHe detectado cambios de estado en estos jugadores:\n\n"
-            msg += "\n".join(changes[:15]) # Limitamos a 15 por si acaso
-            msg += "\n\n¡Revisad vuestras alineaciones! 🧐"
+            # Separar en dos listas: Bajas y Altas
+            bajas = [c for c in changes if "✅" not in c.split("→")[1]]
+            altas = [c for c in changes if "✅" in c.split("→")[1]]
+            
+            msg = "📢 *EL CHIVATO DE BAJAS*\n"
+            msg += "━━━━━━━━━━━━━━━━━━━\n"
+            
+            if bajas:
+                msg += "🚑 *Nuevas Bajas / Dudas:*\n"
+                msg += "\n".join(bajas[:10]) + "\n\n"
+            
+            if altas:
+                msg += "✅ *¡Vuelven al verde!*\n"
+                msg += "\n".join(altas[:10]) + "\n\n"
+            
+            msg += "━━━━━━━━━━━━━━━━━━━\n"
+            msg += "¡Revisad vuestras alineaciones! 🧐⚽️"
             await self.app.bot.send_message(chat_id=self.chat_id, text=msg, parse_mode='Markdown')
 
     async def _daily_previa_job(self, context):
@@ -257,9 +300,12 @@ class BiwengerScheduler:
                         matches.append(f"🕒 *{g_time.strftime('%H:%M')}*: {game['home']['name']} vs {game['away']['name']}")
 
         if matches:
-            msg = "🗓️ *PREVIA DE HOY*\n\nEstos son los partidos que se juegan hoy:\n\n"
+            msg = "🗓️ *PREVIA DE HOY*\n"
+            msg += "━━━━━━━━━━━━━━━━━━━\n"
+            msg += "Estos son los partidos que se juegan hoy:\n\n"
             msg += "\n".join(matches)
-            msg += "\n\n¡Que no se os olvide el once! ⚽"
+            msg += "\n━━━━━━━━━━━━━━━━━━━\n"
+            msg += "¡Que no se os olvide el once! ⚽️"
             await self.app.bot.send_message(chat_id=self.chat_id, text=msg, parse_mode='Markdown')
 
     async def _daily_on_fire_job(self, context):
