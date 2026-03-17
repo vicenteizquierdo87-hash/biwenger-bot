@@ -174,10 +174,10 @@ async def suggestion_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
         return
 
     msg = update.effective_message
-    dev_id = os.getenv("DEVELOPER_CHAT_ID") or os.getenv("TELEGRAM_CHAT_ID")
+    dev_id = os.getenv("DEVELOPER_CHAT_ID")
     
     if not dev_id:
-        await msg.reply_text("❌ Lo siento, el sistema de sugerencias no está configurado correctamente (falta ID).")
+        await msg.reply_text("❌ El sistema de sugerencias no está configurado (falta DEVELOPER_CHAT_ID en Render).")
         context.user_data['state'] = None
         return
 
