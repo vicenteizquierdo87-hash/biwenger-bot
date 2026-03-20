@@ -143,21 +143,16 @@ class BiwengerScheduler:
                     if not last_event_time or match_date_local > last_event_time:
                         last_event_time = match_date_local
 
-        # Si hay partidos hoy, programamos un seguimiento de puntos cada 30 min
+        # Notificar la clasificación solo al final de los partidos de hoy
         if matches_today > 0:
-            start_tracking = first_event_today
-            end_tracking = last_event_time + timedelta(hours=2)
-            
-            if now < end_tracking:
-                when = max(now, start_tracking)
-                self.app.job_queue.run_repeating(
+            notify_time = last_event_time + timedelta(hours=2) # 2 horas después del inicio del último partido
+            if now < notify_time:
+                self.app.job_queue.run_once(
                     self._track_live_points_job,
-                    interval=timedelta(minutes=30),
-                    first=when,
-                    last=end_tracking,
-                    name="live_points_tracker"
+                    when=notify_time,
+                    name="end_of_day_points_tracker"
                 )
-                logger.info(f"Seguimiento de puntos en vivo programado desde {when.strftime('%H:%M')} hasta {end_tracking.strftime('%H:%M')}")
+                logger.info(f"Seguimiento de puntos programado para el final de la jornada a las {notify_time.strftime('%H:%M')}")
         
         logger.info(f"Se han programado {matches_today} alarmas de alineaciones para hoy.")
 
@@ -181,8 +176,8 @@ class BiwengerScheduler:
         await self.app.bot.send_message(chat_id=self.chat_id, text=mensaje, parse_mode='Markdown')
 
     async def _track_live_points_job(self, context):
-        """Monitoriza puntos en vivo durante la jornada."""
-        logger.info("Verificando puntos en directo...")
+        """Notifica los puntos al finalizar la jornada del día."""
+        logger.info("Notificando puntos de final de jornada...")
         data = self.api.get_round_standings()
         if not data or 'league' not in data:
             return
@@ -194,7 +189,7 @@ class BiwengerScheduler:
         # Ordenar por puntos (actualmente total acumulado)
         standings.sort(key=lambda x: x.get('points', 0), reverse=True)
 
-        txt = "📊 *Puntuaciones Actuales*\n\n"
+        txt = "📊 *Clasificación al Cierre de los Partidos*\n\n"
         records = self.persistence.load_records()
         max_changed = False
 
