@@ -33,16 +33,19 @@ class Persistence:
 
     def load_records(self):
         """Carga los récords de la liga."""
+        records = {
+            "max_round_score": {"points": 0, "user": "", "round": ""},
+            "leader_streak": {"user": "", "weeks": 0},
+            "notified_matches": []
+        }
         if os.path.exists(self.records_file):
             try:
                 with open(self.records_file, 'r', encoding='utf-8') as f:
-                    return json.load(f)
+                    loaded = json.load(f)
+                    records.update(loaded)
             except Exception as e:
                 logger.error(f"Error cargando récords: {e}")
-        return {
-            "max_round_score": {"points": 0, "user": "", "round": ""},
-            "leader_streak": {"user": "", "weeks": 0}
-        }
+        return records
 
     def save_records(self, records):
         """Guarda los récords de la liga."""

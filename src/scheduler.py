@@ -37,6 +37,9 @@ class BiwengerScheduler:
         # Tarea 4: Jugadores On Fire a las 23:30 PM
         jq.run_daily(self._daily_on_fire_job, time=time(hour=23, minute=30, tzinfo=self.tz))
         
+        # Tarea 5: Comprobador de partidos finalizados (cada 10 min)
+        jq.run_repeating(self._check_finished_matches_job, interval=timedelta(minutes=10))
+        
         logger.info("Scheduler de alarmas integrado en Telegram iniciado.")
         
         # Ejecutar inmediatamente por si encendemos el bot tarde
@@ -328,3 +331,62 @@ class BiwengerScheduler:
             
             msg += "\n¡Vaya jugones! 🔝"
             await self.app.bot.send_message(chat_id=self.chat_id, text=msg, parse_mode='Markdown')
+
+    async def _check_finished_matches_job(self, context):
+        """Monitoriza si algún partido ha terminado de forma reciente para notificar puntos."""
+        live = self.api.get_live_scores()
+        if not live: return
+        
+        records = self.persistence.load_records()
+        notified = records.get("notified_matches", [])
+        changed_notices = False
+
+        for match in live:
+            m_id = str(match.get('id', ''))
+            status = str(match.get('status', '')).lower()
+            
+            # Sólo notificamos si el partido está finalizado, las picas ya están publicadas y no lo hemos avisado antes
+            scores_published = match.get('scoresPublished', False)
+            
+            if status in ['finished', 'played', 'closed', 'postponed_closed'] and scores_published and m_id not in notified:
+                
+                players = match.get('players', [])
+                if not players:
+                    continue
+                    
+                home_name = match.get('home', {}).get('name', 'Local')
+                away_name = match.get('away', {}).get('name', 'Visitante')
+                
+                # Recopilar todos los jugadores que han jugado
+                scored_players = []
+                for p_data in players:
+                    pts = p_data.get('points')
+                    if pts is not None:
+                        scored_players.append((p_data.get('name', 'Desconocido'), pts))
+                
+                if scored_players:
+                    # Ordenar por puntos de mayor a menor
+                    scored_players.sort(key=lambda x: x[1], reverse=True)
+                    
+                    msg = f"🏁 *FINAL: {home_name} vs {away_name}*\n"
+                    msg += "━━━━━━━━━━━━━━━━━━━\n"
+                    msg += "📊 *Puntuaciones de todos los jugadores:*\n\n"
+                    
+                    for p in scored_players:
+                        icon = "🌟" if p[1] >= 10 else "⭐" if p[1] >= 6 else "▫️" if p[1] >= 0 else "🔻"
+                        msg += f"{icon} *{p[0]}*: {p[1]} pts\n"
+                        
+                    msg += "━━━━━━━━━━━━━━━━━━━\n"
+                    msg += "_Los puntos de los cronistas pueden tardar en ser definitivos_ ⚽"
+                    
+                    try:
+                        await self.app.bot.send_message(chat_id=self.chat_id, text=msg, parse_mode='Markdown')
+                        notified.append(m_id)
+                        changed_notices = True
+                        logger.info(f"Notificados puntos del partido {home_name} vs {away_name}")
+                    except Exception as e:
+                        logger.error(f"Error enviando notificación del partido: {e}")
+
+        if changed_notices:
+            records["notified_matches"] = notified
+            self.persistence.save_records(records)
