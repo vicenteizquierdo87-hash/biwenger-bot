@@ -87,11 +87,6 @@ class BiwengerAPI:
         params = {"lang": "es", "score": "5"}
         return self._get("competitions/la-liga/data", params=params)
 
-    def get_live_scores(self):
-        """Obtiene las puntuaciones en vivo de la jornada actual."""
-        params = {"lang": "es"}
-        return self._get("competitions/la-liga/live", params=params)
-
     def get_round_standings(self):
         """Obtiene la clasificación de la jornada actual de la liga."""
         return self._get("rounds/league")

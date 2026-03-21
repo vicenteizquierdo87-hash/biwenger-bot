@@ -62,6 +62,11 @@ class BiwengerScheduler:
             logger.error("No se han podido obtener los datos de la competición.")
             return
             
+        # GUARDAR PUNTOS MATUTINOS para el On Fire
+        players_data = comp_data.get('players', {})
+        morning_points = {p_id: p_data.get('points', 0) for p_id, p_data in players_data.items()}
+        self.persistence.save_morning_points(morning_points)
+        
         active_events = comp_data.get('activeEvents', [])
         
         # Obtenemos el inicio del día local y final
@@ -307,18 +312,25 @@ class BiwengerScheduler:
             await self.app.bot.send_message(chat_id=self.chat_id, text=msg, parse_mode='Markdown')
 
     async def _daily_on_fire_job(self, context):
-        """Informa de los mejores jugadores reales del día."""
+        """Informa de los mejores jugadores reales del día comparando con los puntos matutinos."""
         logger.info("Enviando informe On Fire...")
-        # Obtenemos datos en vivo para ver quién ha puntuado hoy
-        live = self.api.get_live_scores()
-        if not live: return
+        comp_data = self.api.get_rounds()
+        if not comp_data: return
+        
+        current_players = comp_data.get('players', {})
+        morning_points = self.persistence.load_morning_points()
+        
+        if not morning_points:
+            logger.warning("No hay puntos matutinos para comparar el On Fire.")
+            return
 
         players = []
-        for match in live:
-            for p_data in match.get('players', []):
-                points = p_data.get('points', 0)
-                if points > 0:
-                    players.append((p_data.get('name'), points))
+        for p_id, p_data in current_players.items():
+            current_pts = p_data.get('points', 0)
+            morning_pts = morning_points.get(p_id, current_pts)
+            diff = current_pts - morning_pts
+            if diff > 0:
+                players.append((p_data.get('name', 'Desconocido'), diff))
 
         if players:
             # Ordenar por puntos y coger top 5
@@ -333,60 +345,98 @@ class BiwengerScheduler:
             await self.app.bot.send_message(chat_id=self.chat_id, text=msg, parse_mode='Markdown')
 
     async def _check_finished_matches_job(self, context):
-        """Monitoriza si algún partido ha terminado de forma reciente para notificar puntos."""
-        live = self.api.get_live_scores()
-        if not live: return
+        """Monitoriza si algún partido ha terminado de forma reciente para notificar puntos usando diff."""
+        comp_data = self.api.get_rounds()
+        if not comp_data: return
+        
+        active_events = comp_data.get('activeEvents', [])
+        current_players = comp_data.get('players', {})
         
         records = self.persistence.load_records()
         notified = records.get("notified_matches", [])
         changed_notices = False
+        
+        # Cargar los puntos del último chequeo
+        last_points = self.persistence.load_player_points()
+        points_changed = False
 
-        for match in live:
-            m_id = str(match.get('id', ''))
-            status = str(match.get('status', '')).lower()
+        for event in active_events:
+            if event.get('type') != 'round': continue
             
-            # Sólo notificamos si el partido está finalizado, las picas ya están publicadas y no lo hemos avisado antes
-            scores_published = match.get('scoresPublished', False)
-            
-            if status in ['finished', 'played', 'closed', 'postponed_closed'] and scores_published and m_id not in notified:
+            for match in event.get('games', []):
+                m_id = str(match.get('id', ''))
+                status = str(match.get('status', '')).lower()
                 
-                players = match.get('players', [])
-                if not players:
-                    continue
+                # Si el partido terminó y no lo hemos avisado aún
+                if status in ['finished', 'played', 'closed', 'postponed_closed'] and m_id not in notified:
+                    home_id = match.get('home', {}).get('id')
+                    away_id = match.get('away', {}).get('id')
+                    home_name = match.get('home', {}).get('name', 'Local')
+                    away_name = match.get('away', {}).get('name', 'Visitante')
                     
-                home_name = match.get('home', {}).get('name', 'Local')
-                away_name = match.get('away', {}).get('name', 'Visitante')
-                
-                # Recopilar todos los jugadores que han jugado
-                scored_players = []
-                for p_data in players:
-                    pts = p_data.get('points')
-                    if pts is not None:
-                        scored_players.append((p_data.get('name', 'Desconocido'), pts))
-                
-                if scored_players:
-                    # Ordenar por puntos de mayor a menor
-                    scored_players.sort(key=lambda x: x[1], reverse=True)
+                    scored_players = []
+                    played_teams_players = []
                     
-                    msg = f"🏁 *FINAL: {home_name} vs {away_name}*\n"
-                    msg += "━━━━━━━━━━━━━━━━━━━\n"
-                    msg += "📊 *Puntuaciones de todos los jugadores:*\n\n"
+                    for p_id, p_data in current_players.items():
+                        if p_data.get('teamID') in [home_id, away_id]:
+                            played_teams_players.append(p_id)
+                            current_pts = p_data.get('points', 0)
+                            old_pts = last_points.get(p_id, current_pts)
+                            diff = current_pts - old_pts
+                            if diff != 0:
+                                scored_players.append((p_data.get('name', 'Desconocido'), diff))
                     
-                    for p in scored_players:
-                        icon = "🌟" if p[1] >= 10 else "⭐" if p[1] >= 6 else "▫️" if p[1] >= 0 else "🔻"
-                        msg += f"{icon} *{p[0]}*: {p[1]} pts\n"
+                    # Si detectamos que han cambiado los puntos para los jugadores de este partido
+                    if scored_players:
+                        scored_players.sort(key=lambda x: x[1], reverse=True)
                         
-                    msg += "━━━━━━━━━━━━━━━━━━━\n"
-                    msg += "_Los puntos de los cronistas pueden tardar en ser definitivos_ ⚽"
-                    
-                    try:
-                        await self.app.bot.send_message(chat_id=self.chat_id, text=msg, parse_mode='Markdown')
-                        notified.append(m_id)
-                        changed_notices = True
-                        logger.info(f"Notificados puntos del partido {home_name} vs {away_name}")
-                    except Exception as e:
-                        logger.error(f"Error enviando notificación del partido: {e}")
+                        msg = f"🏁 *FINAL: {home_name} vs {away_name}*\n"
+                        msg += "━━━━━━━━━━━━━━━━━━━\n"
+                        msg += "📊 *Puntuaciones del partido:*\n\n"
+                        
+                        for p in scored_players:
+                            icon = "🌟" if p[1] >= 10 else "⭐" if p[1] >= 6 else "▫️" if p[1] >= 0 else "🔻"
+                            msg += f"{icon} *{p[0]}*: {p[1]} pts\n"
+                            
+                        msg += "━━━━━━━━━━━━━━━━━━━\n"
+                        msg += "_Los puntos de los cronistas pueden ser provisionales_ ⚽"
+                        
+                        try:
+                            await self.app.bot.send_message(chat_id=self.chat_id, text=msg, parse_mode='Markdown')
+                            notified.append(m_id)
+                            changed_notices = True
+                            logger.info(f"Notificados puntos del partido {home_name} vs {away_name}")
+                            
+                            # Actualizamos last_points solo para estos jugadores para no sobreescribir otros
+                            for p_id in played_teams_players:
+                                last_points[p_id] = current_players.get(p_id, {}).get('points', 0)
+                            points_changed = True
+                            
+                        except Exception as e:
+                            logger.error(f"Error enviando notificación del partido: {e}")
+                    else:
+                        # Si han pasado más de 24h desde el inicio del partido y no hemos visto cambios de puntos,
+                        # asumimos que nos lo perdimos mientras el bot estaba apagado y lo silenciamos.
+                        try:
+                            import pytz
+                            from datetime import datetime
+                            match_date = datetime.fromtimestamp(match.get('date', 0), tz=pytz.UTC)
+                            if (datetime.now(pytz.UTC) - match_date).total_seconds() > 86400:
+                                notified.append(m_id)
+                                changed_notices = True
+                                logger.info(f"El partido {home_name} vs {away_name} terminó hace mucho. Abortando monitorización de sus puntos.")
+                        except Exception:
+                            pass
 
         if changed_notices:
             records["notified_matches"] = notified
             self.persistence.save_records(records)
+            
+        if points_changed:
+            self.persistence.save_player_points(last_points)
+        
+        # Inicializar todos los jugadores en el primer run si no existen guardados
+        if not last_points and current_players:
+            for p_id, p_data in current_players.items():
+                last_points[p_id] = p_data.get('points', 0)
+            self.persistence.save_player_points(last_points)
