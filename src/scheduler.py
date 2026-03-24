@@ -50,119 +50,148 @@ class BiwengerScheduler:
         await self._plan_daily_matches()
 
     async def _plan_daily_matches(self):
-        """Busca y programa notificaciones para los partidos de la jornada actual."""
+        """Busca y programa notificaciones para los partidos de la jornada actual agrupados por hora."""
         if not self.chat_id:
             return
 
-        logger.info("Planificando alarmas para los partidos de hoy...")
+        logger.info("Planificando alarmas para los partidos de hoy (agrupados por hora)...")
         
-        # Recuperamos la información general (que incluye jornadas/eventos en activeEvents)
+        # 1. LIMPIAR TRABAJOS PREVIOS para evitar duplicados
+        job_names_to_clear = ["aviso_30min_jornada", "inicio_jornada", "end_of_day_points_tracker"]
+        current_jobs = self.app.job_queue.jobs()
+        for job in current_jobs:
+            if job.name in job_names_to_clear or (job.name and job.name.startswith("alineacion_")):
+                job.schedule_removal()
+                logger.info(f"Trabajo previo {job.name} eliminado.")
+        
+        # 2. Obtener datos de Biwenger
         comp_data = self.api.get_rounds()
         if not comp_data:
             logger.error("No se han podido obtener los datos de la competición.")
             return
-            
+
         # GUARDAR PUNTOS MATUTINOS para el On Fire
         players_data = comp_data.get('players', {})
         morning_points = {p_id: p_data.get('points', 0) for p_id, p_data in players_data.items()}
         self.persistence.save_morning_points(morning_points)
         
         active_events = comp_data.get('activeEvents', [])
-        
-        # Obtenemos el inicio del día local y final
         now = datetime.now(self.tz)
         today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
         today_end = today_start + timedelta(days=1)
         
         matches_today = 0
-        last_event_time = None
-        first_event_today = None
+        last_match_time = None
+        first_match_of_round = None
         
-        # Recorremos los eventos activos (normalmente solo hay uno de tipo 'round')
+        # Agrupamos los partidos por su hora de inicio (timestamp)
+        matches_by_time = {} # {timestamp: [games]}
+        processed_round_ids = set()
+
         for round_event in active_events:
             if round_event.get('type') != 'round':
                 continue
-                
+            
+            r_id = round_event.get('id')
+            if r_id in processed_round_ids: continue
+            processed_round_ids.add(r_id)
+            
             games = round_event.get('games', [])
-            # El primer partido de la jornada total
-            first_game_total = None
-            if games:
-                # Los juegos suelen venir ordenados por fecha, pero por si acaso:
-                sorted_games = sorted(games, key=lambda x: x['date'])
-                first_game_total = sorted_games[0]
-
-                # Notificación de inicio de jornada
-                first_match_utc = datetime.fromtimestamp(first_game_total['date'], tz=pytz.UTC)
-                first_match_local = first_match_utc.astimezone(self.tz)
-                if today_start <= first_match_local < today_end and first_match_local > now:
-                     # Alarma 30 min antes
-                     warning_time = first_match_local - timedelta(minutes=30)
-                     if warning_time > now:
-                         self.app.job_queue.run_once(
-                                self._notify_round_warning_30min_job,
-                                when=warning_time,
-                                name="aviso_30min_jornada"
-                            )
-                         logger.info(f"Alarma de 30 min para inicio de jornada programada a las {warning_time.strftime('%H:%M')}")
-
-                     # Alarma de inicio (5 min antes para que de tiempo a leer antes del piteo)
-                     start_notify_time = first_match_local - timedelta(minutes=5)
-                     if start_notify_time > now:
-                         self.app.job_queue.run_once(
-                                self._notify_round_start_job,
-                                when=start_notify_time,
-                                data={'first_match': f"{first_game_total['home']['name']} vs {sorted_games[0]['away']['name']}"},
-                                name="inicio_jornada"
-                            )
-                         logger.info(f"Alarma de inicio de jornada programada a las {start_notify_time.strftime('%H:%M')}")
-
             for game in games:
                 match_date_utc = datetime.fromtimestamp(game['date'], tz=pytz.UTC)
                 match_date_local = match_date_utc.astimezone(self.tz)
                 
                 # Comprobar si el partido cae en el día de hoy
                 if today_start <= match_date_local < today_end:
-                    home_team = game.get('home', {}).get('name', 'Local')
-                    away_team = game.get('away', {}).get('name', 'Visitante')
-                    
-                    # Alarma de alineaciones 5 min antes
-                    alarm_time = match_date_local - timedelta(minutes=5)
-                    
-                    if alarm_time > now:
-                        self.app.job_queue.run_once(
-                            self._notify_lineups_job,
-                            when=alarm_time,
-                            data={
-                                'match_id': game.get('id'),
-                                'home': home_team,
-                                'away': away_team,
-                                'time': match_date_local.strftime('%H:%M')
-                            },
-                            name=f"alineacion_{game.get('id')}"
-                        )
-                        matches_today += 1
-                        logger.info(f"Alarma programada a las {alarm_time.strftime('%H:%M')} para {home_team} vs {away_team}")
-                    
-                    # Guardar el primer evento de hoy para programar el tracker de puntos
-                    if not first_event_today or match_date_local < first_event_today:
-                        first_event_today = match_date_local
+                    ts = int(game['date'])
+                    if ts not in matches_by_time:
+                        matches_by_time[ts] = []
+                    matches_by_time[ts].append(game)
+                    matches_today += 1
                     
                     # Guardar el último evento de hoy
-                    if not last_event_time or match_date_local > last_event_time:
-                        last_event_time = match_date_local
+                    if not last_match_time or match_date_local > last_match_time:
+                        last_match_time = match_date_local
+            
+            # Identificar si es el inicio de la jornada total (el primer partido de toda la ronda)
+            if games:
+                sorted_games_round = sorted(games, key=lambda x: x['date'])
+                first_game_total = sorted_games_round[0]
+                first_match_utc = datetime.fromtimestamp(first_game_total['date'], tz=pytz.UTC)
+                first_match_local = first_match_utc.astimezone(self.tz)
+                
+                # Si el primer partido de la ronda es hoy, programamos avisos de inicio de jornada
+                if today_start <= first_match_local < today_end and first_match_local > now:
+                    first_match_of_round = first_match_local
+                    
+                    # Alarma 30 min antes (Aviso de cierre de mercado)
+                    warning_time = first_match_local - timedelta(minutes=30)
+                    if warning_time > now:
+                        self.app.job_queue.run_once(
+                            self._notify_round_warning_30min_job,
+                            when=warning_time,
+                            name="aviso_30min_jornada"
+                        )
+                        logger.info(f"Alarma de 30 min para inicio de jornada programada a las {warning_time.strftime('%H:%M')}")
 
-        # Notificar la clasificación solo al final de los partidos de hoy
-        if matches_today > 0:
-            notify_time = last_event_time + timedelta(hours=2) # 2 horas después del inicio del último partido
+        # 3. Programar las alarmas agrupadas
+        for ts, games in matches_by_time.items():
+            match_date_local = datetime.fromtimestamp(ts, tz=pytz.UTC).astimezone(self.tz)
+            alarm_time = match_date_local - timedelta(minutes=5)
+            
+            if alarm_time > now:
+                is_round_start = (first_match_of_round and match_date_local == first_match_of_round)
+                
+                self.app.job_queue.run_once(
+                    self._notify_batch_lineups_job,
+                    when=alarm_time,
+                    data={
+                        'games': games,
+                        'time': match_date_local.strftime('%H:%M'),
+                        'is_round_start': is_round_start
+                    },
+                    name=f"alineacion_batch_{ts}"
+                )
+                logger.info(f"Alarma agrupada programada para las {alarm_time.strftime('%H:%M')} ({len(games)} partidos)")
+
+        # 4. Programar cierre de jornada si hubo partidos hoy
+        if matches_today > 0 and last_match_time:
+            notify_time = last_match_time + timedelta(hours=2)
             if now < notify_time:
                 self.app.job_queue.run_once(
                     self._track_live_points_job,
                     when=notify_time,
                     name="end_of_day_points_tracker"
                 )
-                logger.info(f"Seguimiento de puntos programado para el final de la jornada a las {notify_time.strftime('%H:%M')}")
+                logger.info(f"Seguimiento de puntos programado para las {notify_time.strftime('%H:%M')}")
         
-        logger.info(f"Se han programado {matches_today} alarmas de alineaciones para hoy.")
+        logger.info(f"Planificación completada. {matches_today} partidos organizados en {len(matches_by_time)} bloques horarios.")
+
+    async def _notify_batch_lineups_job(self, context):
+        """Notifica múltiples alineaciones en un solo mensaje."""
+        data = context.job.data
+        games = data['games']
+        is_start = data.get('is_round_start', False)
+        
+        if is_start:
+            msg = "🚀 *¡COMIENZA LA JORNADA!* 🚀\n"
+            msg += "━━━━━━━━━━━━━━━━━━━\n"
+            msg += "¡Alineaciones Guardadas! El mercado se ha cerrado. Mucha suerte a todos. 🍀🏆\n\n"
+            msg += "⚽ *ALINEACIONES CONFIRMADAS:*"
+        else:
+            msg = "⚽ *¡ALINEACIONES CONFIRMADAS!*"
+            
+        msg += "\n━━━━━━━━━━━━━━━━━━━\n"
+        
+        for game in games:
+            home = game.get('home', {}).get('name', 'Local')
+            away = game.get('away', {}).get('name', 'Visitante')
+            msg += f"⚔️ *{home}* vs *{away}*\n"
+        
+        msg += f"\n🕒 Los partidos empiezan a las {data['time']}\n"
+        msg += "⏳ *¡Menos de 5 minutos para el pitido inicial!* 🏃‍♂️"
+        
+        await self.app.bot.send_message(chat_id=self.chat_id, text=msg, parse_mode='Markdown')
 
     async def _notify_round_warning_30min_job(self, context):
         mensaje = (
@@ -170,16 +199,6 @@ class BiwengerScheduler:
             "━━━━━━━━━━━━━━━━━━━\n"
             "Quedan exactamente 30 minutos para que empiece la jornada.\n\n"
             "🚨 *¡Asegúrate de que tu alineación esté guardada!* A partir del inicio del primer partido ya no podrás hacer cambios. 🛑"
-        )
-        await self.app.bot.send_message(chat_id=self.chat_id, text=mensaje, parse_mode='Markdown')
-
-    async def _notify_round_start_job(self, context):
-        match_info = context.job.data.get('first_match', 'el primer partido')
-        mensaje = (
-            "🚀 *¡COMIENZA LA JORNADA!* 🚀\n"
-            "━━━━━━━━━━━━━━━━━━━\n"
-            f"El primer partido (*{match_info}*) está a punto de empezar.\n\n"
-            "¡Alineaciones Guardadas! Mucha suerte a todos en Biwenger. 🍀🏆"
         )
         await self.app.bot.send_message(chat_id=self.chat_id, text=mensaje, parse_mode='Markdown')
 
@@ -221,15 +240,6 @@ class BiwengerScheduler:
         txt += "\n_Actualizado automáticamente_ 🔄"
         await self.app.bot.send_message(chat_id=self.chat_id, text=txt, parse_mode='Markdown')
 
-    async def _notify_lineups_job(self, context):
-        data = context.job.data
-        mensaje = (
-            f"⚽ *¡ALINEACIONES CONFIRMADAS!*\n\n"
-            f"⚔️ {data['home']} vs {data['away']}\n"
-            f"🕒 El partido empieza a las {data['time']}\n\n"
-            f"⏳ *¡Tienes menos de 5 minutos para hacer cambios en Biwenger!*"
-        )
-        await self.app.bot.send_message(chat_id=self.chat_id, text=mensaje, parse_mode='Markdown')
 
     async def _check_player_status_job(self, context):
         """Monitoriza cambios en el estado de los jugadores (lesiones, dudas, etc.)"""
@@ -374,31 +384,48 @@ class BiwengerScheduler:
                     home_name = match.get('home', {}).get('name', 'Local')
                     away_name = match.get('away', {}).get('name', 'Visitante')
                     
-                    scored_players = []
-                    played_teams_players = []
-                    
+                    match_players = []
                     for p_id, p_data in current_players.items():
                         if p_data.get('teamID') in [home_id, away_id]:
-                            played_teams_players.append(p_id)
-                            current_pts = p_data.get('points', 0)
-                            old_pts = last_points.get(p_id, current_pts)
-                            diff = current_pts - old_pts
-                            if diff != 0:
-                                scored_players.append((p_data.get('name', 'Desconocido'), diff))
+                            fitness = p_data.get('fitness', [])
+                            # Usamos fitness[0] como fuente más fiable del partido actual si está disponible
+                            if fitness and fitness[0] is not None:
+                                try:
+                                    score = int(fitness[0])
+                                    if score != 0: # Solo mostramos jugadores que han puntuado
+                                        match_players.append({
+                                            'name': p_data.get('name', 'Desconocido'),
+                                            'score': score,
+                                            'teamID': p_data.get('teamID')
+                                        })
+                                except (ValueError, TypeError):
+                                    continue
                     
-                    # Si detectamos que han cambiado los puntos para los jugadores de este partido
-                    if scored_players:
-                        scored_players.sort(key=lambda x: x[1], reverse=True)
+                    if match_players:
+                        # Ordenar por puntuación descendente
+                        match_players.sort(key=lambda x: x['score'], reverse=True)
                         
-                        msg = f"🏁 *FINAL: {home_name} vs {away_name}*\n"
+                        msg = f"🏁 *FINAL: {home_name} {match.get('home', {}).get('score')} - {match.get('away', {}).get('score')} {away_name}*\n"
                         msg += "━━━━━━━━━━━━━━━━━━━\n"
                         msg += "📊 *Puntuaciones del partido:*\n\n"
                         
-                        for p in scored_players:
-                            icon = "🌟" if p[1] >= 10 else "⭐" if p[1] >= 6 else "▫️" if p[1] >= 0 else "🔻"
-                            msg += f"{icon} *{p[0]}*: {p[1]} pts\n"
+                        # Agrupar por equipos
+                        home_p = [p for p in match_players if p['teamID'] == home_id]
+                        away_p = [p for p in match_players if p['teamID'] == away_id]
+                        
+                        if home_p:
+                            msg += f"🏠 *{home_name.upper()}*\n"
+                            for p in home_p:
+                                icon = "🌟" if p['score'] >= 10 else "⭐" if p['score'] >= 6 else "▫️" if p['score'] >= 0 else "🔻"
+                                msg += f"{icon} *{p['name']}*: {p['score']} pts\n"
+                        
+                        if away_p:
+                            msg += f"\n🚀 *{away_name.upper()}*\n"
+                            for p in away_p:
+                                icon = "🌟" if p['score'] >= 10 else "⭐" if p['score'] >= 6 else "▫️" if p['score'] >= 0 else "🔻"
+                                msg += f"{icon} *{p['name']}*: {p['score']} pts\n"
                             
-                        msg += "━━━━━━━━━━━━━━━━━━━\n"
+                        msg += "\n━━━━━━━━━━━━━━━━━━━\n"
                         msg += "_Los puntos de los cronistas pueden ser provisionales_ ⚽"
                         
                         try:
@@ -406,20 +433,12 @@ class BiwengerScheduler:
                             notified.append(m_id)
                             changed_notices = True
                             logger.info(f"Notificados puntos del partido {home_name} vs {away_name}")
-                            
-                            # Actualizamos last_points solo para estos jugadores para no sobreescribir otros
-                            for p_id in played_teams_players:
-                                last_points[p_id] = current_players.get(p_id, {}).get('points', 0)
-                            points_changed = True
-                            
                         except Exception as e:
                             logger.error(f"Error enviando notificación del partido: {e}")
                     else:
                         # Si han pasado más de 24h desde el inicio del partido y no hemos visto cambios de puntos,
                         # asumimos que nos lo perdimos mientras el bot estaba apagado y lo silenciamos.
                         try:
-                            import pytz
-                            from datetime import datetime
                             match_date = datetime.fromtimestamp(match.get('date', 0), tz=pytz.UTC)
                             if (datetime.now(pytz.UTC) - match_date).total_seconds() > 86400:
                                 notified.append(m_id)
@@ -432,11 +451,7 @@ class BiwengerScheduler:
             records["notified_matches"] = notified
             self.persistence.save_records(records)
             
-        if points_changed:
-            self.persistence.save_player_points(last_points)
-        
-        # Inicializar todos los jugadores en el primer run si no existen guardados
-        if not last_points and current_players:
-            for p_id, p_data in current_players.items():
-                last_points[p_id] = p_data.get('points', 0)
-            self.persistence.save_player_points(last_points)
+        # Actualizamos last_points en cada chequeo para mantener la consistencia
+        if current_players:
+            new_last_points = {p_id: p_data.get('points', 0) for p_id, p_data in current_players.items()}
+            self.persistence.save_player_points(new_last_points)
